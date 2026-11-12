@@ -18,7 +18,9 @@ def _run(panel):
     for ix in df.groupby(sess, sort=False).indices.values():
         ix = np.asarray(ix)
         valid = ix[(ix >= 5) & (sec[ix] >= START) & (sec[ix] < FLAT)]
-        sides = np.sign(composite[valid]); sides[np.abs(composite[valid]) < PARAMS["threshold"]] = 0
+        raw = np.sign(composite[valid]); raw[np.isnan(composite[valid])] = 0
+        raw[np.abs(composite[valid]) < PARAMS["threshold"]] = 0
+        sides = raw
         stop = PARAMS["stop_dollars"] / 500.
         for e, side in zip(valid, sides):
             if not side: continue
