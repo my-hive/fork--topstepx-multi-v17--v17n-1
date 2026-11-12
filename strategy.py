@@ -1,13 +1,14 @@
-"""v17n-1 experiment 1.
-Mechanism: EIA weekly petroleum inventory release (Wed 09:30 CT) creates an initial liquidity
-shock; hedger flow and delayed price discovery may partly reverse the first 15 minutes.
-Falsification: stressed PnL or any chronological era nonpositive, or <70% positive years.
+"""v17n-1 exp2. Mechanism: natural-gas trend persistence from slow storage/weather information
+diffusion and producer-hedger pressure. Sign of trailing 5-session return (completed session
+closes) is held intraday 08:30-14:50 CT in QG with hard stop. Falsification: stressed PnL or any
+era nonpositive, or <70% positive years -> trend not harvestable intraday after costs.
 """
 import numpy as np
 
-FAMILY = "energy-eia-release-initial-shock-reversal"
-PARAMS = {"observe_minutes": 15, "hold_minutes": 45, "stop_frac_of_range": 0.5}
-PV, FLAT = 500.0, 15 * 3600 + 10 * 60  # QM $/point
+FAMILY = "energy-ng-multisession-trend-intraday"
+PARAMS = {"lookback_sessions": 5, "entry_ct_sec": 30600, "stop_dollars": 280}
+PV = 2500.0
+FLAT = 15 * 3600 + 9 * 60
 
 
 def _run(panel):
@@ -16,32 +17,27 @@ def _run(panel):
         out = np.zeros(len(df), dtype=np.int64)
         rk = np.zeros(len(df))
         sig[symbol], risk[symbol] = out, rk
-        if symbol != "QM":
+        if symbol != "QG":
             continue
         sec = df.ct_sec.to_numpy()
-        close, high, low = (df[c].to_numpy() for c in ("close", "high", "low"))
-        session = df.session.astype(str).to_numpy()
-        wd = df.index.tz_convert("America/Chicago").weekday.to_numpy()
-        for idx in df.groupby(session, sort=False).indices.values():
-            i = np.asarray(idx)
-            hit = i[(wd[i] == 2) & (sec[i] == 34200 + 14 * 60)]  # last observe bar 09:44
-            if not len(hit):
+        close = df.close.to_numpy()
+        groups = list(df.groupby(df.session.astype(str), sort=False).indices.values())
+        last = [g[-1] for g in groups]
+        stop = PARAMS["stop_dollars"] / PV
+        for k in range(PARAMS["lookback_sessions"], len(groups)):
+            ret = close[last[k - 1]] - close[last[k - 1 - PARAMS["lookback_sessions"]]]
+            side = int(np.sign(ret))
+            g = np.asarray(groups[k])
+            ent = g[sec[g] == PARAMS["entry_ct_sec"]]
+            if not side or not len(ent):
                 continue
-            end = hit[0]
-            start = end - 14
-            if start < i[0] or sec[start] != 34200:
-                continue
-            side = -int(np.sign(close[end] - close[start]))
-            rng = high[start:end + 1].max() - low[start:end + 1].min()
-            stop = 0.5 * rng
-            if not side or stop <= 0 or stop * PV > 300:
-                continue
-            entry = close[end]  # approx of next open; stop checked on completed closes
-            for j in range(end, min(end + 46, i[-1] + 1)):
-                if sec[j] >= FLAT or (side * (close[j] - entry) <= -stop and j > end):
+            e = ent[0]
+            entry = close[e]
+            for j in range(e, g[-1] + 1):
+                if sec[j] >= FLAT or (j > e and side * (close[j] - entry) <= -stop):
                     break
                 out[j] = side
-                rk[j] = stop * PV
+                rk[j] = PARAMS["stop_dollars"]
     return sig, risk
 
 
